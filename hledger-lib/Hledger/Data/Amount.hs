@@ -209,8 +209,7 @@ digits = "123456789" :: String
 
 -- | Does this amount appear to be zero when displayed with its given precision ?
 isZeroAmount :: Amount -> Bool
-isZeroAmount a --  a==missingamt = False
-               | otherwise     = (null . filter (`elem` digits) . showAmountWithoutPriceOrCommodity) a
+isZeroAmount = null . filter (`elem` digits) . showamountquantity
 
 -- | Is this amount "really" zero, regardless of the display precision ?
 isReallyZeroAmount :: Amount -> Bool
@@ -238,10 +237,6 @@ showAmountDebug Amount{..} = printf "Amount {acommodity=%s, aquantity=%s, aprice
 -- | Get the string representation of an amount, without any \@ price.
 showAmountWithoutPrice :: Amount -> String
 showAmountWithoutPrice a = showAmount a{aprice=NoPrice}
-
--- | Get the string representation of an amount, without any price or commodity symbol.
-showAmountWithoutPriceOrCommodity :: Amount -> String
-showAmountWithoutPriceOrCommodity a = showAmount a{acommodity="", aprice=NoPrice}
 
 showPrice :: Price -> String
 showPrice NoPrice         = ""
