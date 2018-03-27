@@ -13,7 +13,7 @@ Some of these might belong in Hledger.Read.JournalReader or Hledger.Read.
 -}
 
 --- * module
-{-# LANGUAGE CPP, BangPatterns, DeriveDataTypeable, RecordWildCards, NamedFieldPuns, NoMonoLocalBinds, ScopedTypeVariables, FlexibleContexts, TupleSections, OverloadedStrings #-}
+{-# LANGUAGE CPP, BangPatterns, DeriveDataTypeable, RecordWildCards, NamedFieldPuns, NoMonoLocalBinds, ScopedTypeVariables, FlexibleContexts, TupleSections, OverloadedStrings, MultiWayIf #-}
 {-# LANGUAGE LambdaCase #-}
 
 module Hledger.Read.Common
@@ -43,6 +43,12 @@ import Data.Time.LocalTime
 import Safe
 import System.Time (getClockTime)
 import Text.Megaparsec.Compat
+
+import qualified Data.List.NonEmpty as NE
+import qualified Data.Set as E
+import Data.Text.Internal
+import Data.Text.Unsafe
+import Text.Megaparsec.Internal
 
 import Hledger.Data
 import Hledger.Utils
@@ -341,6 +347,44 @@ modifiedaccountnamep = do
     joinAccountNames parent
     a
 
+data AccountNameState =
+    NormalCharacter
+  | SingleSpace
+
+{-# INLINE spanAccountName #-}
+spanAccountName :: Text -> (Text, Text)
+spanAccountName t@(Text arr off len) = (hd,tl)
+  where hd = text arr off k
+        tl = text arr (off+k) (len-k)
+        !k = loop 0 0 SingleSpace
+        loop !i0 !i !a | i < len =
+                     if | c == ' ' ->
+                          case a of
+                           SingleSpace -> i0
+                           NormalCharacter -> loop i (i+d) SingleSpace
+                        | not (isSpace c) -> loop i (i+d) NormalCharacter
+                        | otherwise ->
+                          case a of
+                            SingleSpace -> i0
+                            NormalCharacter -> i
+                   | otherwise      =
+                     case a of
+                       SingleSpace -> i0
+                       NormalCharacter -> i
+            where Iter c d = iter t i
+
+takeAccountName :: TextParser m AccountName
+takeAccountName = ParsecT $ \(State input (pos:|z) tp w) cok _ eok _ ->
+  let pxy = Proxy :: Proxy Text
+      (ts, input') = spanAccountName input
+      !npos = advanceN pxy w pos ts
+      len = chunkLength pxy ts
+      hs = mempty
+  in if chunkEmpty pxy ts
+       then eok ts (State input' (npos:|z) (tp + len) w) hs
+       else cok ts (State input' (npos:|z) (tp + len) w) hs
+{-# INLINE takeAccountName #-}
+
 -- | Parse an account name. Account names start with a non-space, may
 -- have single spaces inside them, and are terminated by two or more
 -- spaces (or end of input). Also they have one or more components of
@@ -348,18 +392,10 @@ modifiedaccountnamep = do
 -- (This parser will also consume one following space, if present.)
 accountnamep :: TextParser m AccountName
 accountnamep = do
-    astr <- do
-      c <- nonspace
-      cs <- striptrailingspace <$> many (nonspace <|> singlespace)
-      return $ c:cs
-    let a = T.pack astr
+    a <- takeAccountName
     when (accountNameFromComponents (accountNameComponents a) /= a)
-         (fail $ "account name seems ill-formed: "++astr)
+         (fail $ "account name seems ill-formed: "++ T.unpack a)
     return a
-    where
-      singlespace = try (do {spacenonewline; do {notFollowedBy spacenonewline; return ' '}})
-      striptrailingspace "" = ""
-      striptrailingspace s  = if last s == ' ' then init s else s
 
 -- accountnamechar = notFollowedBy (oneOf "()[]") >> nonspace
 --     <?> "account name character (non-bracket, non-parenthesis, non-whitespace)"
